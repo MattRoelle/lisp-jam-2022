@@ -1,0 +1,6 @@
+*~
+/releases
+/buildtools/appimage/love-prepared/
+/buildtools/appimage/*.AppImage
+/buildtools/appimage/squashfs-root
+*.private
