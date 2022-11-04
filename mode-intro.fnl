@@ -45,7 +45,7 @@
    :max-hp 70 
    :exp 0
    :str 6
-   :light 5
+   :light 6
    :effects []
    :inventory []
    :gold 50})
@@ -69,13 +69,14 @@
 (λ generate-board []
   (set board [])
   (for [i 1 100]
-    (table.insert board {:type :empty})))
+    (table.insert board {:type :empty :entity (if 
+                                                (= i 5) {:type :bat :hp 5}
+                                                nil)})))
 
 (λ submit-action [n]
   (let [action (. actions n)]
     (when action 
       (log action.label)
-      (print :doing-action action.label)
       ((. action :handler)))))
 
 ;; Macros
@@ -150,9 +151,9 @@
   (for [i (* -1 player-state.light) player-state.light]
     (let [space-n (+ player-state.n i)
           space (. board space-n)
-          x (animate (.. :board-space- space-n) i (* DT 3) {:start 
-                                                            (if (<= space-n 6) nil
-                                                              (+ i (if (> i 0) 1 -1)))})]
+          x (animate (.. :board-space- space-n) i (* DT 3) 
+                     {:start (if (<= space-n 6) nil
+                               (+ i (if (> i 0) 1 -1)))})]
       (when space
         (with-transform (+ stage-center-x (* x space-size 1.25)) (* stage-height 0.66) 0 1 1
            (draw-board-space 0 0 palette.fg 
@@ -161,7 +162,9 @@
                                           (= (math.abs i) player-state.light) 0.35
                                         0.6)
                                       (* DT 6)
-                                      {:start 0}))))))
+                                      {:start 0}))
+           (when space.entity 
+             (draw-rectangle palette.red -8 (+ (* 4 (math.sin (* 2 T))) -32) 16 16 2))))))
   (with-transform (+ stage-center-x 0) (* stage-height 0.66) 0 1 1
     (draw-player)))
 
