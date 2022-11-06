@@ -38,6 +38,14 @@
 (var palette palettes.default)
 (var board [])
 (var logs [])
+
+(var shake-until -1)
+(var shake-intensity 0)
+(λ screen-shake [duration intensity]
+  (set shake-until (+ T duration))
+  (set shake-intensity intensity))
+
+
 (var player-state 
   {:n 1
    :hp 70 
@@ -67,19 +75,19 @@
   (for [i 1 100]
     (table.insert board {:type :empty 
                          :enemy (if 
-                                  (= i 5) {:type :bat :hp 5}
-                                  (= i 20) {:type :bat :hp 5}
+                                  (= 5 i) {:type :bat :hp 5}
+                                  (= 0 (% i 10)) {:type :bat :hp 5}
                                   nil)})))
 
 (λ open-inventory []
   (set inventory-open true))
 
-(λ move-forward []
-  (if (= player-state.n 1) (log "You take your first steps"))
-  (set player-state.n (+ player-state.n 1)))
+(λ move-backwards []
+  (when (> player-state.n 1)
+    (set player-state.n (- player-state.n 1))))
 
 (λ get-attack []
-  (or (?. player-state.weapon :atk) 1))
+  (or (?. player-state.weapon :attack) 1))
 
 (λ player-hurt [v]
   (set player-state.hp (- player-state.hp v)))
@@ -91,38 +99,47 @@
   (> (math.random) 0.5))
 
 (λ fight []
+  (screen-shake 0.3 4)
   (let [enmy (assert (. board (+ player-state.n 1) :enemy))
         atk (get-attack)]
     (set enmy.hp (- enmy.hp atk))
     (when (get-enemy-hit-chance enmy)
       (log (.. "The " enmy.type " attacks you for " (.. (get-enemy-attack enmy))))
       (player-hurt (get-enemy-attack enmy)))
-    (when (< enmy.hp 0)
+    (when (< enmy.hp 1)
       (log (.. "The " enmy.type " dies"))
       (tset board (+ player-state.n 1) :enemy nil))))
+
+
+(λ move-forward []
+  (if (= player-state.n 1) (log "You take your first steps"))
+  (let [next-tile (. board (+ player-state.n 1))]
+    (if next-tile.enemy
+      (fight)
+      (set player-state.n (+ player-state.n 1)))))
+
 
 (λ determine-next-action []
   (let [tile (. board player-state.n)
         next-tile (. board (+ player-state.n 1))
         weapon-name (or (?. player-state.weapon :name) :fists)
         weapon-atk (or (?. player-state.weapon :attack) 1)]
-    (if 
-      next-tile.enemy 
-     [{:label (or (?. player-state :weapon :name) :punch)
-       :handler 
-       #(do 
-          ; (log (.. weapon-name) " FOR " weapon-atk) 
-          ; (log (.. next-tile.enemy.type " WITH YOUR"))
-          (log (.. "YOU ATTACKED THE " next-tile.enemy.type " WITH YOUR " weapon-name " FOR " weapon-atk)) 
-          (fight))
-       :text (.. "ATK - " weapon-atk)}
-      {:label "INVENTORY" :handler open-inventory}]
-     [{:label "FORWARD" :handler move-forward}
-      {:label "INVENTORY" :handler open-inventory}])))
+     [{:label "FORWARD" :keys ["right" "l"] :handler move-forward}
+      {:label "BACKWARDS" :keys ["left" "h"] :handler move-backwards}
+      {:label "INVENTORY" :keys ["i"]  :handler open-inventory}]))
 
-(λ submit-action [n]
-  (let [action (. actions n)]
-    (when action 
+(λ match-kbd-to-action [key]
+  (var ret nil)
+  (each [ix v (ipairs actions)]
+    (when (lume.find v.keys key)
+      (set ret v)))
+  ret)
+  
+
+(λ handle-key-action [key]
+  (print :got key)
+  (let [action (match-kbd-to-action key)]
+    (when (?. action :handler) 
       ((. action :handler))
       (set actions (determine-next-action)))))
 
@@ -206,7 +223,7 @@
   (for [i (* -1 player-state.light) player-state.light]
     (let [space-n (+ player-state.n i)
           space (. board space-n)
-          x (animate (.. :board-space- space-n) i (* DT 3) 
+          x (animate (.. :board-space- space-n) i (* DT 6) 
                      {:start (if (<= space-n 6) nil
                                (+ i (if (> i 0) 1 -1)))})]
       (when space
@@ -237,6 +254,7 @@
   (draw-stat-box palette.fg 16 16 "HP" player-state.hp)
   (draw-stat-box palette.fg 16 52 "LVL" (get-level))
   (draw-stat-box palette.fg 16 88 "STR" player-state.str)
+  (draw-text player-state.n fnt16 palette.white (- stage-width 64) 4)
   (for [i 1 10]
     (let [j (- 10 i)]
       (when (. logs i)
@@ -250,20 +268,18 @@
         button-width (* total-button-width 0.9)
         margin (- total-button-width button-width)
         half-margin (/ margin 2)]
-    (for [i 1 4]
-      (let [action (. actions i)]
-        (when action
-         (with-transform (+ half-margin (* (- i 1) (+ button-width margin))) 
-                       (* stage-height 0.81)
-                       0 1 1
-          (love.graphics.setColor (unpack palette.fg))
-          (love.graphics.rectangle :fill 0 0 button-width 100 4)
-          (love.graphics.setFont fnt24)
-          (love.graphics.setColor 0 0 0 1)
-          (love.graphics.print (tostring i) 4 4)
-          (love.graphics.print action.label 4 72)
-          (when action.text
-            (draw-text action.text fnt24 [0 0 0 1] 4 40))))))))
+    (each [i action (ipairs actions)]
+      (with-transform 40 (+ (* i 18) (* stage-height 0.75)) 0 1 1
+       (draw-text (table.concat action.keys " or ") fnt16 palette.fg 0 0)
+       (draw-text action.label fnt16 palette.white 150 0)))))
+       ; (love.graphics.setColor (unpack palette.fg))
+       ; (love.graphics.rectangle :fill 0 0 button-width 100 4)
+       ; (love.graphics.setFont fnt24)
+       ; (love.graphics.setColor 0 0 0 1)
+       ; (love.graphics.print (tostring i) 4 4)
+       ; (love.graphics.print action.label 4 72)
+       ; (when action.text
+       ;   (draw-text action.text fnt24 [0 0 0 1] 4 40))))))
        ; (love.graphics.setFont fnt24)
        ; (love.graphics.setColor 0 0 0 1)
        ; (love.graphics.print "HP 100" 4 4)))))
@@ -276,23 +292,20 @@
 {:draw (λ draw [?message]
          (local (w h _flags) (love.window.getMode))
          (draw-rectangle palette.bg 0 0 w h 10)
-         (draw-board)
+         (if (< T shake-until)
+           (with-transform (- (* (math.random) shake-intensity 2) shake-intensity)
+                           (- (* (math.random) shake-intensity 2) shake-intensity)
+                           0 1 1
+            (draw-board))
+           (draw-board))
          (draw-actions)
          (draw-ui))
 
  :update (λ update [dt set-mode]
-           (print T)
            (set DT dt)
            (set T (+ T DT))
            (clean-stale-animations!))
  :keypressed 
  (λ keypressed [key set-mode]
-   (if (= key :1) (submit-action 1)
-       (= key :2) (submit-action 2)
-       (= key :3) (submit-action 3)
-       (= key :4) (submit-action 4)
-       (= key :h) (submit-action 1)
-       (= key :j) (submit-action 2)
-       (= key :k) (submit-action 3)
-       (= key :l) (submit-action 4)))}
+   (handle-key-action key))}
 
