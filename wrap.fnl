@@ -43,3 +43,7 @@
       (love.event.quit)
       ;; add what each keypress should do in each mode
       (safely #(mode.keypressed key set-mode))))
+
+(fn love.keyreleased [key]
+   (safely #(mode.keyreleased key set-mode)))
+

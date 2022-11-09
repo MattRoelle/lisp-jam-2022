@@ -1,7 +1,6 @@
 (import-macros {: incf} :sample-macros)
 (local lume (require :lib.lume))
 
-(love.graphics.setDefaultFilter :nearest :nearest)
 
 ;; Constants 
 (local stage-width (/ 1920 2))
@@ -13,10 +12,15 @@
 (local exp-curve [8 13 21 34 55 89])
 
 ;; Assets 
-(local fnt12 (love.graphics.newFont :assets/04B_30__.ttf 12))
-(local fnt16 (love.graphics.newFont :assets/04B_30__.ttf 16))
-(local fnt24 (love.graphics.newFont :assets/04B_30__.ttf 24))
-(local fnt32 (love.graphics.newFont :assets/04B_30__.ttf 32))
+(love.graphics.setDefaultFilter :nearest :nearest)
+(λ load-fnt [path sz]
+  (let [fnt (love.graphics.newFont path sz)]
+    (fnt:setFilter :nearest :nearest)
+    fnt))
+(local font-xs (load-fnt :assets/upheavtt.ttf 16))
+(local fnt-sm (load-fnt :assets/upheavtt.ttf 20))
+(local fnt-md (load-fnt :assets/upheavtt.ttf 28))
+(local fnt-lg (load-fnt :assets/upheavtt.ttf 36))
 
 ;; Palettes 
 (local palettes 
@@ -38,6 +42,7 @@
 (var palette palettes.default)
 (var board [])
 (var logs [])
+(var last-keydown nil)
 
 (var shake-until -1)
 (var shake-intensity 0)
@@ -80,7 +85,7 @@
                                   nil)})))
 
 (λ open-inventory []
-  (set inventory-open true))
+  (set inventory-open (not inventory-open)))
 
 (λ move-backwards []
   (when (> player-state.n 1)
@@ -137,7 +142,6 @@
   
 
 (λ handle-key-action [key]
-  (print :got key)
   (let [action (match-kbd-to-action key)]
     (when (?. action :handler) 
       ((. action :handler))
@@ -174,6 +178,10 @@
              (values k v))))))
 
 ;; Drawing functions
+(λ set-alpha [c a]
+  (let [[r g b] c]
+    [r g b a]))
+
 (λ *color [color v]
   (icollect [_ c (ipairs color)]
     (* v c)))
@@ -189,9 +197,17 @@
     (love.graphics.setColor (unpack color))
     (love.graphics.rectangle :fill x y w h ?r)))
 
-(λ draw-progress-bar [color x y w h v max]
+(λ stroke-rectangle [color x y w h ?r ?w]
   (with-transform (- x (/ w 2))
                   (- y (/ h 2))
+                  0 1 1
+    (love.graphics.setColor (unpack color))
+    (love.graphics.setLineWidth (or ?w 1))
+    (love.graphics.rectangle :line x y w h ?r)))
+
+(λ draw-progress-bar [color x y w h v max]
+  (with-transform (- x (/ w 4))
+                  (- y (/ h 4))
                   0 1 1
     (love.graphics.setColor (unpack color))
     (love.graphics.rectangle :fill x y (* w (/ v max)) h)))
@@ -205,10 +221,11 @@
     (draw-rectangle (*color color lum) 0 0 (* 0.8 space-size) (* 0.8 space-size) 10)))
 
 (λ draw-player []
-  (draw-rectangle palette.black -8 -24 24 36 5)
-  (draw-rectangle palette.white -8 -24 20 32 4)
+  (let [h (+ 0.9 (* 0.1 (math.sin (* 2 T))))]
+     (draw-rectangle palette.black -8 -24 24 (* h 36) 5)
+     (draw-rectangle palette.white -8 -24 20 (* h 32) 4))
   (love.graphics.setColor (unpack palette.white)))
-  ; (draw-text 5 fnt32 palette.red -8 -120))
+  ; (draw-text 5 fnt-lg palette.red -8 -120))
   ; (draw-progress-bar palette.red -8 -44 24 8 player-state.hp player-state.max-hp))
 
 (λ draw-enemy [enemy]
@@ -216,7 +233,7 @@
   (when (not enemy.shown)
     (set enemy.shown true)
     (log (.. "There is a " enemy.type)))
-  (draw-text enemy.hp fnt24 palette.red -25 -8) 
+  (draw-text enemy.hp fnt-md palette.red -25 -8) 
   (draw-rectangle palette.red -8 (+ (* 4 (math.sin (* 2 T))) -32) 16 16 2))
 
 (λ draw-board []
@@ -227,7 +244,9 @@
                      {:start (if (<= space-n 6) nil
                                (+ i (if (> i 0) 1 -1)))})]
       (when space
-        (with-transform (+ stage-center-x (* x space-size 1.25)) (* stage-height 0.66) 0 1 1
+        (with-transform (+ stage-center-x (* x space-size 1.25)) 
+                        (* stage-height 0.66) 
+                        0 1 1
            (draw-board-space 0 0 palette.fg 
                              (animate (.. :board-space- space-n :-lum)
                                       (if (= player-state.n space-n) 1 
@@ -246,41 +265,71 @@
     ; (love.graphics.rectangle :fill -2 2 200 32)
     (love.graphics.setColor (unpack color))
     (love.graphics.rectangle :fill 0 0 200 32 8)
-    (love.graphics.setFont fnt24)
+    (love.graphics.setFont fnt-md)
     (love.graphics.setColor 0 0 0 1)
     (love.graphics.print (.. label " " value) 8 4)))
+
+(λ draw-modal [key title draw-body]
+ (let [t (animate key 1 (* DT 16) {:start 0})
+       w 440
+       h (* w (/ 2 3)) 
+       bw 8
+       top-x stage-center-x
+       top-y (- stage-center-y (* h 0.35) (* (- 1 t) -32))]
+    (with-transform top-x top-y 0 1 1
+      (stroke-rectangle (set-alpha palette.fg 1) 0 0 w h 4 bw)
+      (draw-rectangle (set-alpha palette.black 1) 0 0 w h 4)
+      (love.graphics.translate (+ bw (* w -0.5)) (* h -0.5))
+      (draw-text title fnt-lg palette.white 0 0)
+      (draw-body t))))
+          
+
+(λ draw-inventory []
+  (draw-modal :inventory "INVENTORY"
+    #(do))) 
+       ; (draw-rectangle palette.fg 0 0 40 40))))
 
 (λ draw-ui []
   (draw-stat-box palette.fg 16 16 "HP" player-state.hp)
   (draw-stat-box palette.fg 16 52 "LVL" (get-level))
   (draw-stat-box palette.fg 16 88 "STR" player-state.str)
-  (draw-text player-state.n fnt16 palette.white (- stage-width 64) 4)
+  (draw-text player-state.n fnt-sm palette.white (- stage-width 64) 4)
   (for [i 1 10]
     (let [j (- 10 i)]
       (when (. logs i)
-       (love.graphics.setFont fnt12)
+       (love.graphics.setFont font-xs)
        (love.graphics.setColor (*color palette.white (math.max 0.1 (/ j 5))))
-       (love.graphics.print (. logs i)  (* stage-width 0.333) (+ 20 (* 14 (- j 1))))))))
+       (love.graphics.print (. logs i)  (* stage-width 0.333) (+ 20 (* 14 (- j 1)))))))
+  (when inventory-open 
+    (draw-inventory)))
   ; (draw-stat-box palette.fg 5 32 "LVL" (get-level player-state.exp)))
 
 (λ draw-actions []
   (let [total-button-width (/ stage-width 4)
         button-width (* total-button-width 0.9)
+        active-action (if last-keydown (match-kbd-to-action last-keydown) nil)
         margin (- total-button-width button-width)
         half-margin (/ margin 2)]
     (each [i action (ipairs actions)]
       (with-transform 40 (+ (* i 18) (* stage-height 0.75)) 0 1 1
-       (draw-text (table.concat action.keys " or ") fnt16 palette.fg 0 0)
-       (draw-text action.label fnt16 palette.white 150 0)))))
+       (if (= action active-action)
+         (do 
+           (love.graphics.setColor 0.2 0.2 0.2 1)
+           (love.graphics.rectangle :fill -4 0 300 18)
+           (draw-text (table.concat action.keys " or ") fnt-sm palette.fg 0 0)
+           (draw-text action.label fnt-sm palette.white 150 0))
+         (do 
+           (draw-text (table.concat action.keys " or ") fnt-sm palette.fg 0 0)
+           (draw-text action.label fnt-sm palette.white 150 0)))))))
        ; (love.graphics.setColor (unpack palette.fg))
        ; (love.graphics.rectangle :fill 0 0 button-width 100 4)
-       ; (love.graphics.setFont fnt24)
+       ; (love.graphics.setFont fnt-md)
        ; (love.graphics.setColor 0 0 0 1)
        ; (love.graphics.print (tostring i) 4 4)
        ; (love.graphics.print action.label 4 72)
        ; (when action.text
-       ;   (draw-text action.text fnt24 [0 0 0 1] 4 40))))))
-       ; (love.graphics.setFont fnt24)
+       ;   (draw-text action.text fnt-md [0 0 0 1] 4 40))))))
+       ; (love.graphics.setFont fnt-md)
        ; (love.graphics.setColor 0 0 0 1)
        ; (love.graphics.print "HP 100" 4 4)))))
 
@@ -305,7 +354,11 @@
            (set DT dt)
            (set T (+ T DT))
            (clean-stale-animations!))
+ :keyreleased 
+ (λ keyreleased [key set-mode]
+   (set last-keydown nil))
  :keypressed 
  (λ keypressed [key set-mode]
+   (set last-keydown key)
    (handle-key-action key))}
 
